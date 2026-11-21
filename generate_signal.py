@@ -1,35 +1,46 @@
 import numpy as np
 import os
 
-# Создаем папку test_data, если ее нет
 os.makedirs("test_data", exist_ok=True)
 
-# Параметры
-fs = 250
-duration = 30  # 30 секунд записи
-t = np.arange(0, duration, 1/fs)
-signal = np.zeros_like(t)
-
-# Генерируем удары сердца (примерно 75 уд/мин)
-hr = 75
-rr = 60 / hr
-
-# Добавляем небольшую вариабельность ритма (чтобы pNN50 было не 0)
-for beat in np.arange(0.5, duration, rr):
-    # случайное отклонение в 10 мс
-    jitter = np.random.uniform(-0.01, 0.01) 
-    idx = int((beat + jitter) * fs)
+def generate_ecg(hr_base, duration=30, fs=250, noise_level=0.05, artifact=False, path="test_data/file.txt"):
+    t = np.arange(0, duration, 1/fs)
+    signal = np.zeros_like(t)
+    rr_base = 60 / hr_base
     
-    if idx < len(signal) and idx + 10 < len(signal):
-        # Форма QRS-комплекса (треугольный импульс)
-        signal[idx:idx+10] += np.hanning(10) * 1.0
+    current_time = 0.5
+    while current_time < duration:
+        # Добавляем вариабельность (jitter) для pNN50
+        jitter = np.random.uniform(-0.015, 0.015)
+        beat = current_time + jitter
+        idx = int(beat * fs)
+        
+        if 0 < idx < len(signal) - 10:
+            signal[idx:idx+10] += np.hanning(10) * 1.0
+            
+        current_time += rr_base
 
-# Добавляем шум и дрейф изолинии (как в реальной ЭКГ)
-noise = np.random.normal(0, 0.05, len(signal))
-baseline_wander = 0.2 * np.sin(2 * np.pi * 0.3 * t)
+    # Добавляем шум и дрейф изолинии
+    noise = np.random.normal(0, noise_level, len(signal))
+    baseline_wander = 0.2 * np.sin(2 * np.pi * 0.3 * t)
+    
+    final_signal = signal + noise + baseline_wander
+    
+    # Если нужно добавить артефакт (высокоамплитудный выброс)
+    if artifact:
+        artifact_idx = int(duration * fs / 2)
+        final_signal[artifact_idx:artifact_idx+50] += np.random.normal(0, 2.0, 50)
+        
+    np.savetxt(path, final_signal, fmt="%.6f")
+    print(f"Создан файл: {path} (HR={hr_base} уд/мин)")
 
-final_signal = signal + noise + baseline_wander
+# 1. Нормальный ритм (базовый)
+generate_ecg(hr_base=75, noise_level=0.05, path="test_data/raw_signal.txt")
 
-# Сохраняем в файл
-np.savetxt("test_data/raw_signal.txt", final_signal, fmt="%.6f")
-print(f"Файл test_data/raw_signal.txt успешно создан! ({len(final_signal)} отсчетов)")
+# 2. Сигнал с высоким уровнем шума (проверка фильтра)
+generate_ecg(hr_base=60, noise_level=0.3, path="test_data/noisy_signal.txt")
+
+# 3. Сигнал с артефактом движения (проверка устойчивости детектора)
+generate_ecg(hr_base=90, noise_level=0.05, artifact=True, path="test_data/artifact_signal.txt")
+
+print("\nВсе тестовые файлы успешно сгенерированы!")
