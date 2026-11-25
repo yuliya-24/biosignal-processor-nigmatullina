@@ -1,5 +1,6 @@
 import numpy as np
 import os
+np.random.seed(42)  # воспроизводимые тестовые данные
 
 os.makedirs("test_data", exist_ok=True)
 

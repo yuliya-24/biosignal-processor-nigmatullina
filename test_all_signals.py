@@ -1,49 +1,52 @@
+import os
+import matplotlib
+matplotlib.use("Agg")  # без окна: график сохраняется в файл
 import matplotlib.pyplot as plt
 from signal_processor import process_biosignal
-import os
-
-FILES_TO_TEST = [
-    ("test_data/raw_signal.txt", "Нормальный ритм (75 уд/мин)"),
-    ("test_data/noisy_signal.txt", "Высокий уровень шума"),
-    ("test_data/artifact_signal.txt", "Артефакт движения")
-]
 
 FS = 250.0
 
-fig, axes = plt.subplots(3, 1, figsize=(12, 12))
+CASES = [
+    ("test_data/raw_signal.txt", "Нормальный ритм (75 уд/мин)", 75, 2),
+    ("test_data/noisy_signal.txt", "Высокий уровень шума (60 уд/мин)", 60, 3),
+    ("test_data/artifact_signal.txt", "Артефакт движения (90 уд/мин)", 90, 4),
+]
 
-for i, (filepath, title) in enumerate(FILES_TO_TEST):
-    if not os.path.exists(filepath):
-        print(f"Файл {filepath} не найден!")
-        continue
-        
-    print(f"\nОбработка: {title}")
+def load(path):
+    with open(path) as f:
+        return [float(line) for line in f if line.strip()]
+
+fig, axes = plt.subplots(len(CASES), 1, figsize=(12, 10))
+
+for ax, (path, title, true_hr, tol) in zip(axes, CASES):
+    assert os.path.exists(path), f"Файл {path} не найден (запустите generate_signal.py)"
+    result = process_biosignal(load(path), fs=FS)
     
-    # Чтение
-    raw_signal = []
-    with open(filepath, "r") as f:
-        for line in f:
-            if line.strip():
-                raw_signal.append(float(line))
-                
-    # Обработка
-    result = process_biosignal(raw_signal, fs=FS)
-    features = result["calculated_features"]
+    feats = result["calculated_features"]
     events = result["detected_events"]
+    filt = result["filtered_signal"]
     
-    print(f"  Найдено R-пиков: {features['n_r_peaks']}")
-    print(f"  ЧСС: {features.get('mean_hr_bpm', 0):.1f} уд/мин")
-    print(f"  pNN50: {features.get('pNN50', 0):.1f} %")
+    print(f"{title}: пиков={feats['n_r_peaks']}, ЧСС={feats['mean_hr_bpm']}, pNN50={feats['pNN50']}")
     
-    # Построение
-    ax = axes[i]
-    ax.plot(result["filtered_signal"], color="blue", linewidth=0.7, alpha=0.7)
-    if events:
-        filt = result["filtered_signal"]
-        ax.plot(events, [filt[j] for j in events], "r.", markersize=6, label="R-пики")
+    # Проверки
+    assert feats["mean_hr_bpm"] is not None, "ЧСС не рассчитана"
+    assert abs(feats["mean_hr_bpm"] - true_hr) <= tol, \
+        f"ЧСС {feats['mean_hr_bpm']:.1f} отличается от {true_hr} больше чем на {tol}"
+    assert feats["pNN50"] is not None and 0 <= feats["pNN50"] <= 100
     
+    ax.plot(filt, color="blue", linewidth=0.7, alpha=0.7)
+    ax.plot(events, [filt[i] for i in events], "r.", markersize=6, label="R-пики")
     ax.set_title(f"{title} (найдено: {len(events)})")
     ax.legend(loc="upper right")
 
+# Проверка обработки некорректного входа
+for bad_signal, bad_fs in [([1, 2, 3, 4, 5], FS), (load(CASES[0][0]), 0.0)]:
+    try:
+        process_biosignal(bad_signal, fs=bad_fs)
+        raise AssertionError("Ожидался ValueError")
+    except ValueError:
+        pass
+
+print("\nВСЕ ПРОВЕРКИ ПРОЙДЕНЫ. График сохранен в test_data/all_signals.png")
 plt.tight_layout()
-plt.show()
+plt.savefig("test_data/all_signals.png", dpi=120)
